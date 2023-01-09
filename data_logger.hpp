@@ -1,0 +1,472 @@
+#pragma once
+
+#include <ulog_sqlite.h>
+#include <SPI.h>
+#include <FS.h>
+#include <SD.h>
+#include "RTC_clock.hpp"
+#include <array>
+
+#define MAX_FILE_NAME_LEN 100
+#define MAX_STR_LEN 500
+
+#define BUF_SIZE 4096
+byte buf[BUF_SIZE];
+//todo: I'm to constantly update this based on the current month
+std::string filename = "not_set_yet.DB";
+extern const char sqlite_sig[];
+
+FILE *myFile;
+
+int32_t read_fn_wctx(struct dblog_write_context *ctx, void *buf, uint32_t pos, size_t len)
+{
+	if (fseek(myFile, pos, SEEK_SET))
+		return DBLOG_RES_SEEK_ERR;
+	size_t ret = fread(buf, 1, len, myFile);
+	if (ret != len)
+		return DBLOG_RES_READ_ERR;
+	return ret;
+}
+
+int32_t read_fn_rctx(struct dblog_read_context *ctx, void *buf, uint32_t pos, size_t len)
+{
+	if (fseek(myFile, pos, SEEK_SET))
+		return DBLOG_RES_SEEK_ERR;
+	size_t ret = fread(buf, 1, len, myFile);
+	if (ret != len)
+		return DBLOG_RES_READ_ERR;
+	return ret;
+}
+
+int32_t write_fn(struct dblog_write_context *ctx, void *buf, uint32_t pos, size_t len)
+{
+	if (fseek(myFile, pos, SEEK_SET))
+		return DBLOG_RES_SEEK_ERR;
+	size_t ret = fwrite(buf, 1, len, myFile);
+	if (ret != len)
+		return DBLOG_RES_ERR;
+	if (fflush(myFile))
+		return DBLOG_RES_FLUSH_ERR;
+	fsync(fileno(myFile));
+	return ret;
+}
+
+int flush_fn(struct dblog_write_context *ctx)
+{
+	return DBLOG_RES_OK;
+}
+
+void listDir(fs::FS &fs, const char *dirname)
+{
+	Serial.print(F("Listing directory: "));
+	Serial.println(dirname);
+	File root = fs.open(dirname);
+	if (!root)
+	{
+		Serial.println(F("Failed to open directory"));
+		return;
+	}
+	if (!root.isDirectory())
+	{
+		Serial.println("Not a directory");
+		return;
+	}
+	File file = root.openNextFile();
+	while (file)
+	{
+		if (file.isDirectory())
+		{
+			Serial.print(" Dir : ");
+			Serial.println(file.name());
+		}
+		else
+		{
+			Serial.print(" File: ");
+			Serial.print(file.name());
+			Serial.print(" Size: ");
+			Serial.println(file.size());
+		}
+		file = root.openNextFile();
+	}
+}
+
+void appendFile(fs::FS &fs, const char * path, const char * message){
+    Serial.printf("Appending to file: %s\n", path);
+
+    File file = fs.open(path, FILE_APPEND);
+    if(!file){
+        Serial.println("Failed to open file for appending");
+        return;
+    }
+    if(file.print(message)){
+        Serial.println("Message appended");
+    } else {
+        Serial.println("Append failed");
+    }
+    file.close();
+}
+
+void writeFile(fs::FS &fs, const char * path, const char * message){
+    Serial.printf("Writing file: %s\n", path);
+
+    File file = fs.open(path, FILE_WRITE);
+    if(!file){
+        Serial.println("Failed to open file for writing");
+        return;
+    }
+    if(file.print(message)){
+        Serial.println("File written");
+    } else {
+        Serial.println("Write failed");
+    }
+    file.close();
+}
+
+void readFile(fs::FS &fs, const char * path){
+    Serial.printf("Reading file: %s\n", path);
+
+    File file = fs.open(path);
+    if(!file){
+        Serial.println("Failed to open file for reading");
+        return;
+    }
+    Serial.print("Read from file: ");
+    while(file.available()){
+        Serial.write(file.read());
+    }
+    file.close();
+}
+
+void check_for_month(fs::FS &fs, const char * path, std::string *read_month)
+{
+	File file = fs.open(path, FILE_READ, true);
+	if(!file)
+	{
+		Serial.println("failed to open file for reading");
+		return;
+	}
+	while(file.available())
+	{
+		*read_month += file.read();
+	}
+	file.close();
+}
+
+void renameFile(fs::FS &fs, const char *path1, const char *path2)
+{
+	Serial.printf("Renaming file %s to %s\n", path1, path2);
+	if (fs.rename(path1, path2))
+		Serial.println(F("File renamed"));
+	else
+		Serial.println(F("Rename failed"));
+}
+
+void deleteFile(fs::FS &fs, const char *path)
+{
+	Serial.printf("Deleting file: %s\n", path);
+	if (fs.remove(path))
+		Serial.println(F("File deleted"));
+	else
+		Serial.println(F("Delete failed"));
+}
+
+void print_error(int res)
+{
+	Serial.print(F("Err:"));
+	Serial.print(res);
+	Serial.print(F("\n"));
+}
+
+int pow10(int8_t len)
+{
+	return (len == 3 ? 1000 : (len == 2 ? 100 : (len == 1 ? 10 : 1)));
+}
+
+void set_ts_part(char *s, int val, int8_t len)
+{
+	while (len--)
+	{
+		*s++ = '0' + val / pow10(len);
+		val %= pow10(len);
+	}
+}
+
+int get_ts_part(char *s, int8_t len)
+{
+	int i = 0;
+	while (len--)
+		i += ((*s++ - '0') * pow10(len));
+	return i;
+}
+
+int update_ts_part(char *ptr, int8_t len, int limit, int ovflw)
+{
+	int8_t is_one_based = (limit == 1000 || limit == 60 || limit == 24) ? 0 : 1;
+	int part = get_ts_part(ptr, len) + ovflw - is_one_based;
+	ovflw = part / limit;
+	part %= limit;
+	set_ts_part(ptr, part + is_one_based, len);
+	return ovflw;
+}
+// "YYYY-MM-DD HH:MM"
+int update_ts_min_and_check_for_new_day_and_month(char *ts, int diff)
+{
+	uint8_t checker;
+	int ovflw = update_ts_part(ts + 14, 2, 60, diff); // minutes
+	if (ovflw)
+	{
+		ovflw = update_ts_part(ts + 11, 2, 24, ovflw); // hours
+		if (ovflw)
+		{
+			int8_t month = get_ts_part(ts + 5, 2);
+			int year = get_ts_part(ts, 4);
+			int8_t limit = (month == 2 ? (year % 4 ? 28 : 29) : 
+			(month == 4 || month == 6 || month == 9 || month == 11 ? 30 : 31));
+			ovflw = update_ts_part(ts + 8, 2, limit, ovflw); // day
+			checker = 1; //to show that the timestamp has entered another day, switch to the next row of the array
+			if (ovflw) 
+			{
+				ovflw = update_ts_part(ts + 5, 2, 12, ovflw); // month
+				checker = 2; //to show another month has been encountered, stop the retrival
+				if (ovflw)
+					set_ts_part(ts, year + ovflw, 4); // year
+			}
+		}
+	} return checker;
+}
+
+void recover_db()
+{
+	struct dblog_write_context ctx;
+	ctx.buf = buf;
+	ctx.read_fn = read_fn_wctx;
+	ctx.write_fn = write_fn;
+	ctx.flush_fn = flush_fn;
+	// input_db_name();
+	myFile = fopen(filename.c_str(), "r+b");
+	if (!myFile)
+	{
+		print_error(0);
+		return;
+	}
+	int32_t page_size = dblog_read_page_size(&ctx);
+	if (page_size < 512)
+	{
+		Serial.print(F("Error reading page size\n"));
+		fclose(myFile);
+		return;
+	}
+	if (dblog_recover(&ctx))
+	{
+		Serial.print(F("Error during recover\n"));
+		fclose(myFile);
+		return;
+	}
+	fclose(myFile);
+}
+
+bool log_data(int16_t _sum, int16_t _peak, int16_t _least)
+{
+	// data from the adc would be read every seconds and stored in an array
+	// every second. this data would be accumulated for 10 minutes and sent to the database
+	// so the database would contain energy usage for each 10 minute, the peak power in the 10 minutes, the least power in the 10 minutes
+	// the current timestamp would accompany the logged data 
+	// every 10 min the data is sent to the db, 
+	// upon request the system sums up all logs giving the kWh in a month, per day could be calculated first
+	// so a daily average, peak and least could be retrieved
+
+	std::string date_time_string;
+	date_time_to_string( &date_time_string ) ;
+
+	myFile = fopen(filename.c_str(), "w+b");
+	if( myFile )
+	{
+		struct dblog_write_context ctx;
+		ctx.buf = buf;
+		ctx.col_count = 4;
+		ctx.page_resv_bytes = 0;
+		ctx.page_size_exp = 12;
+		ctx.max_pages_exp = 0;
+		ctx.read_fn = read_fn_wctx;
+		ctx.flush_fn = flush_fn;
+		ctx.write_fn = write_fn;
+		int res = dblog_init_for_append(&ctx);
+		if( res == DBLOG_RES_NOT_FINALIZED)
+			dblog_finalize(&ctx);
+		if(!res)
+		{
+			res = dblog_set_col_val(&ctx, 0, DBLOG_TYPE_TEXT, date_time_string.c_str(), date_time_string.length());
+			if( res ){ print_error(res); fclose(myFile); return 0; }
+
+			res = dblog_set_col_val(&ctx, 1, DBLOG_TYPE_INT, &_sum, sizeof(int16_t));
+			if( res ){ print_error(res); fclose(myFile); return 0; }
+
+			res = dblog_set_col_val(&ctx, 2, DBLOG_TYPE_INT, &_peak, sizeof(int16_t));
+			if( res ){ print_error(res); fclose(myFile); return 0; }
+
+			res = dblog_set_col_val(&ctx, 3, DBLOG_TYPE_INT, &_least, sizeof(int16_t));
+			if( res ){ print_error(res); fclose(myFile); return 0; }
+
+			res = dblog_append_empty_row(&ctx);
+			if( res ){ print_error(res); fclose(myFile); return 0; }
+
+			Serial.print(F("\nLogging completed. Finalizing...\n"));
+			if (!res)
+				res = dblog_finalize(&ctx);
+			fclose(myFile);
+			return 1;
+		}
+		else Serial.print(F("Open Error\n"));
+	}
+}
+
+int16_t get_int16(const byte *ptr)
+{
+	return (*ptr << 8) | ptr[1];
+}
+
+void extract_row_values(struct dblog_read_context *ctx, char *first, int16_t *second, int16_t *third, int16_t *fouth)
+{
+	int16_t i = 0;
+	while(i < 4)
+	{
+		uint32_t col_type;
+		const byte *col_val = (const byte *) dblog_read_col_val(ctx, i, &col_type);
+		if (!col_val) {
+			if (i == 0){ Serial.print(F("Error reading value\n")); }
+			return;
+		}
+		switch (i)
+		{
+			case 0: {
+				uint32_t col_len = dblog_derive_data_len(col_type);
+				for (int j = 0; j < col_len; j++){
+					*first = (char)col_val[j];
+					first++;
+				}
+			}break;
+			case 1:
+				*second = get_int16(col_val);
+				break;
+			case 2:
+				*third = get_int16(col_val);
+				break;
+			case 3:
+				*fouth = get_int16(col_val);
+				break;
+		}
+		i++;
+	}
+}
+
+void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
+{
+	int daily_summary [31][4];
+	int daily_energy_sum, daily_peak, daily_least;
+	uint8_t current_month;
+	uint16_t current_year;
+	get_current_month_year(&current_month, &current_year);  //? what am I to do with this again?
+	*message += "Energy Usage summary per month.\nTotal Energy used(kWh): "; //todo change this while testing to reduce cost
+
+	struct dblog_read_context rctx;
+	rctx.page_size_exp = 12;
+	rctx.read_fn = read_fn_rctx;
+
+	std::string temp_filename = filename;
+	if(month_difference)
+	{
+		if(month_difference >= current_month)
+		{
+			current_year -= 1;
+			current_month = 12 - month_difference + current_month;
+			temp_filename.replace(0, 2, current_month < 10 ? ("0" + std::to_string(current_month)) : std::to_string(current_month));
+			temp_filename.replace(3, 4, std::to_string(current_year + 1900));
+		}
+		else
+		{
+			current_month -= month_difference;
+			temp_filename.replace(0, 2, current_month < 10 ? ("0" + std::to_string(current_month)) : std::to_string(current_month));
+		}
+		if(SD.exists(temp_filename.c_str()))
+			myFile = fopen(temp_filename.c_str(), "r+b");
+		else 
+		{
+			Serial.println("File doesn't exist");
+			return;
+		}
+	}
+	else
+		myFile = fopen(filename.c_str(), "r+b"); //I will have to change the filename to that of a previous month and check if the file exists for the next stint
+	if (myFile)
+	{
+		rctx.buf = buf;
+		int res = dblog_read_init(&rctx);
+		if ( res ){ print_error(res); fclose(myFile); return; }
+		if (memcmp(buf, sqlite_sig, 16) || buf[68] != 0xA5) 
+		{
+			Serial.print(F("Invalid DB. Try recovery.\n")); //todo: try adding a recovery code here
+			fclose(myFile);
+			return;
+		}
+		if (BUF_SIZE < (int32_t) 1 << rctx.page_size_exp)
+		{
+			Serial.print(F("Buffer size less than Page size. Try increasing if enough SRAM\n"));
+			fclose(myFile);
+			return;
+		}
+		char row_ts [17];
+		int16_t row_kWh, row_peak_W, row_least_W;
+		dblog_read_first_row(&rctx);
+		extract_row_values(&rctx, row_ts, &row_kWh, &row_peak_W, &row_least_W);
+		uint16_t row_day = get_ts_part(row_ts + 8, 2);
+		daily_energy_sum = row_kWh;
+		daily_peak = row_peak_W;
+		daily_least = row_least_W;
+
+		int i = 1; //i is for db row counting, multiply by 10 minutes to get total approximate minutes of power usage
+		int j = 0; //iterate through the rows of the 2d array (it shows how many days power was used)
+		res = dblog_read_next_row(&rctx);
+		while(!res)
+		{
+			extract_row_values(&rctx, row_ts, &row_kWh, &row_peak_W, &row_least_W);
+			if( get_ts_part(row_ts + 8, 2) != row_day) // it's a new day, dump that of the previous day
+			{
+				daily_summary[j][0] = row_day;
+				daily_summary[j][1] = daily_energy_sum;
+				daily_summary[j][2] = daily_peak;
+				daily_summary[j][3] = daily_least;
+				
+				row_day = get_ts_part(row_ts + 8, 2);
+				daily_energy_sum = 0;	//reset the parameters after dumping
+				daily_peak = row_peak_W;
+				daily_least = row_least_W;
+				j++;
+			}
+			daily_energy_sum += row_kWh;
+			if(row_peak_W > daily_peak)
+				daily_peak = row_peak_W;
+			if(row_least_W < daily_least)
+				daily_least = row_least_W;
+			i++;
+			res = dblog_read_next_row(&rctx);
+			if(res) //it's the end of the db
+			{
+				daily_summary[j][0] = row_day;
+				daily_summary[j][1] = daily_energy_sum;
+				daily_summary[j][2] = daily_peak;
+				daily_summary[j][3] = daily_least;
+			}
+		}
+		//at this point all data would have been extracted into the array: let's roll
+		//to get the total energy used sum up all the index 1 column of all rows
+		//to get the peak power consumed iterate through the index 2 column to check the max value
+		//to get the least power consumed iterate through the index 3 column to check the least value
+		//to get the average power consumed divide the sum energy by (i * 10)/60
+		//to get the average energy used per day divide the sum energy used by j
+		//
+
+		fclose(myFile);
+	}
+	else 
+		Serial.print(F("Open Error\n"));
+}
