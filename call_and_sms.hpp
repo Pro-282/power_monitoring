@@ -103,20 +103,32 @@ void send_SMS( std::string SMS_target, std::string message )
 bool recieved_call( std::string *tel_no )
 {
     char buffer[100];
-    if(SerialAT.available())
+    if( SerialAT.available() > 0 )
     {
-        if(SerialAT.find("RING"))
-            SerialAT.readBytes(buffer, sizeof(buffer));
+        // Serial.println("I got here 1");
+        // if(SerialAT.find("RING")){
+        //     Serial.println("I got here 2.1");
+        //     SerialAT.readBytes(buffer, sizeof(buffer));
+        //     Serial.println("I'm here");
+        // }
+        // else return 0;
+    // }
+        SerialAT.readBytes(buffer, sizeof(buffer));
+        std::string buff(buffer);
+        if(buff.find("RING") != std::string::npos){
+            size_t pos;
+            Serial.println("I'm here");
+            if(buff.find("\"+") != std::string::npos)
+            {
+                pos = buff.find("\"+");
+                *tel_no = buff.substr(pos + 1, 14);
+                return 1;
+            }
+        }
         else return 0;
     }
-    std::string buff(buffer);
-    size_t pos;
-    if(buff.find("\"+") != std::string::npos)
-    {
-        pos = buff.find("\"+");
-        *tel_no = buff.substr(pos + 1, 14);
-        return 1;
+    else {
+        Serial.println("noting in serial");
+        return 0;
     }
-    else return 0;
 }
-

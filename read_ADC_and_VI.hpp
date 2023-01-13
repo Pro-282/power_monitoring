@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ADS1115_lite.h>
 
 #define ADC_COUNTS 32768
@@ -6,12 +8,12 @@
 
 ADS1115_lite adc(ADS1115_DEFAULT_ADDRESS); 
 
-double VCAL = 234.26;
-double ICAL = 1.08;
+double VCAL = 120;
+double ICAL = 0.5;
 double PHASECAL = 1.7;
 
 int startV;
-int sampleV, sampleI;
+int sampleV, sampleI, lastsampleV, lastsampleI;
 double lastFilteredV, filteredV;
 double filteredI;
 double offsetV, offsetI;
@@ -20,13 +22,13 @@ double sqV,sumV,sqI,sumI,instP,sumP;
 double realPower, apparentPower, powerFactor, Vrms, Irms;
 bool lastVCross, checkVCross; 
 
-double I_RATIO = (long double)CT_TURNS / CT_BURDEN_RESISTOR * 2.048 / 32768 * ICAL;
-double V_RATIO = (long double)2.048 / 32768 * VCAL;
+double I_RATIO = (long double)CT_TURNS / CT_BURDEN_RESISTOR * 4.096 / 32768 * ICAL;
+double V_RATIO = (long double)4.096 / 32768 * VCAL;
 
 void init_ADC()
 {
-    adc.setGain(ADS1115_REG_CONFIG_PGA_2_048V); //* I will have to multiply gotten raw values by (2.048/32767) ~ 0.0625mV to get the voltage equivalent
-    adc.setSampleRate(ADS1115_REG_CONFIG_DR_250SPS);
+    adc.setGain(ADS1115_REG_CONFIG_PGA_4_096V); //* I will have to multiply gotten raw values by (4.096/32767) ~ 0.0625mV to get the voltage equivalent
+    adc.setSampleRate(ADS1115_REG_CONFIG_DR_128SPS);
 
     if (!adc.testConnection()) {
       Serial.println("ADS1115 Connection failed");
@@ -36,7 +38,7 @@ void init_ADC()
 
 int read_current_raw()
 {
-    Serial.print("Setting mux to differential mode between AIN0 and AIN01 @250SPS...");
+    // Serial.print("Setting mux to differential mode between AIN0 and AIN01 @250SPS...");
     adc.setMux(ADS1115_REG_CONFIG_MUX_DIFF_0_1);
     adc.triggerConversion(); 
     int raw_value = adc.getConversion();
@@ -45,7 +47,7 @@ int read_current_raw()
 
 int read_voltage_raw()
 {
-    Serial.print("Setting mux to differential mode between AIN02 and AIN03 @250SPS...");
+    // Serial.print("Setting mux to differential mode between AIN02 and AIN03 @250SPS...");
     adc.setMux(ADS1115_REG_CONFIG_MUX_DIFF_2_3);
     adc.triggerConversion(); 
     int raw_value = adc.getConversion();
@@ -72,6 +74,7 @@ int calc_VI(unsigned int crossings, unsigned int timeout)		// typically use cros
 	{
 		numberOfSamples++;                       //Count number of times looped.
 		lastFilteredV = filteredV;               //Used for delay/phase compensation
+		lastsampleV = sampleV;
 		
 		// A) Read in raw voltage and current samples
 		sampleV = read_voltage_raw();
@@ -79,8 +82,10 @@ int calc_VI(unsigned int crossings, unsigned int timeout)		// typically use cros
 
 		// B) Apply digital low pass filters to extract the 2.5 V or 1.65 V dc offset,
     			//     then subtract this - signal is now centred on 0 counts.
-		offsetV = offsetV + ((sampleV-offsetV)/32768);
-		filteredV = sampleV - offsetV;
+		// offsetV = offsetV + ((sampleV-offsetV)/32768);
+		// filteredV = sampleV - offsetV;
+		filteredV = sampleV;
+		// filteredV = 0.9989 * (lastFilteredV+sampleV-lastsampleV);
 		offsetI = offsetI + ((sampleI-offsetI)/32768);
 		filteredI = sampleI - offsetI;
 
@@ -142,5 +147,5 @@ void serialprint()
 	Serial.print(' ');
 	Serial.print(powerFactor);
 	Serial.println(' ');
-	delay(100);
+	// delay(100);
 }

@@ -13,7 +13,8 @@
 #define BUF_SIZE 4096
 byte buf[BUF_SIZE];
 //todo: I'm to constantly update this based on the current month
-std::string filename = "not_set_yet.DB";
+std::string filename;
+std::string proxi_db_name = "not_set_yet.DB";
 extern const char sqlite_sig[];
 
 FILE *myFile;
@@ -149,6 +150,8 @@ void check_for_month(fs::FS &fs, const char * path, std::string *read_month)
 	{
 		*read_month += file.read();
 	}
+	Serial.print("text from sd card: ");
+	Serial.println(read_month->c_str());
 	file.close();
 }
 
@@ -276,10 +279,10 @@ bool log_data(int16_t _sum, int16_t _peak, int16_t _least)
 	// so a daily average, peak and least could be retrieved
 
 	std::string date_time_string;
-	date_time_to_string( &date_time_string ) ;
-
-	myFile = fopen(filename.c_str(), "w+b");
-	if( myFile )
+	date_time_to_string( &date_time_string );
+	Serial.println(filename.c_str());
+	myFile = fopen(filename.c_str(), "r+b");
+	if(myFile)
 	{
 		struct dblog_write_context ctx;
 		ctx.buf = buf;
@@ -291,33 +294,44 @@ bool log_data(int16_t _sum, int16_t _peak, int16_t _least)
 		ctx.flush_fn = flush_fn;
 		ctx.write_fn = write_fn;
 		int res = dblog_init_for_append(&ctx);
-		if( res == DBLOG_RES_NOT_FINALIZED)
+		if( res == DBLOG_RES_NOT_FINALIZED )
 			dblog_finalize(&ctx);
 		if(!res)
 		{
-			res = dblog_set_col_val(&ctx, 0, DBLOG_TYPE_TEXT, date_time_string.c_str(), date_time_string.length());
-			if( res ){ print_error(res); fclose(myFile); return 0; }
-
-			res = dblog_set_col_val(&ctx, 1, DBLOG_TYPE_INT, &_sum, sizeof(int16_t));
-			if( res ){ print_error(res); fclose(myFile); return 0; }
-
-			res = dblog_set_col_val(&ctx, 2, DBLOG_TYPE_INT, &_peak, sizeof(int16_t));
-			if( res ){ print_error(res); fclose(myFile); return 0; }
-
-			res = dblog_set_col_val(&ctx, 3, DBLOG_TYPE_INT, &_least, sizeof(int16_t));
-			if( res ){ print_error(res); fclose(myFile); return 0; }
-
 			res = dblog_append_empty_row(&ctx);
 			if( res ){ print_error(res); fclose(myFile); return 0; }
-
-			Serial.print(F("\nLogging completed. Finalizing...\n"));
+			
+			res = dblog_set_col_val(&ctx, 0, DBLOG_TYPE_TEXT, date_time_string.c_str(), date_time_string.length());
+			if( res ){ print_error(res); fclose(myFile); return 0; }
+			
+			res = dblog_set_col_val(&ctx, 1, DBLOG_TYPE_INT, &_sum, sizeof(int16_t));
+			if( res ){ print_error(res); fclose(myFile); return 0; }
+			
+			res = dblog_set_col_val(&ctx, 2, DBLOG_TYPE_INT, &_peak, sizeof(int16_t));
+			if( res ){ print_error(res); fclose(myFile); return 0; }
+			
+			res = dblog_set_col_val(&ctx, 3, DBLOG_TYPE_INT, &_least, sizeof(int16_t));
+			if( res ){ print_error(res); fclose(myFile); return 0; }
+			
+			
+			Serial.print(F("Logging completed. Finalizing...\n"));
 			if (!res)
 				res = dblog_finalize(&ctx);
 			fclose(myFile);
 			return 1;
 		}
-		else Serial.print(F("Open Error\n"));
+		else
+		{
+			fclose(myFile);
+			print_error(res);
+			return 0;
+		}
 	}
+	else
+	{
+		Serial.print(F("Open Error\n"));
+		return 0;
+	} 
 }
 
 int16_t get_int16(const byte *ptr)
@@ -379,13 +393,13 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 		{
 			current_year -= 1;
 			current_month = 12 - month_difference + current_month;
-			temp_filename.replace(0, 2, current_month < 10 ? ("0" + std::to_string(current_month)) : std::to_string(current_month));
-			temp_filename.replace(3, 4, std::to_string(current_year + 1900));
+			temp_filename.replace(4, 2, current_month < 10 ? ("0" + std::to_string(current_month)) : std::to_string(current_month));
+			temp_filename.replace(7, 4, std::to_string(current_year + 1900));
 		}
 		else
 		{
 			current_month -= month_difference;
-			temp_filename.replace(0, 2, current_month < 10 ? ("0" + std::to_string(current_month)) : std::to_string(current_month));
+			temp_filename.replace(4, 2, current_month < 10 ? ("0" + std::to_string(current_month)) : std::to_string(current_month));
 		}
 		if(SD.exists(temp_filename.c_str()))
 			myFile = fopen(temp_filename.c_str(), "r+b");
@@ -469,4 +483,45 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 	}
 	else 
 		Serial.print(F("Open Error\n"));
+}
+
+bool log_proximity_data(int duration)
+{
+	std::string date_time_string;
+	date_time_to_string( &date_time_string ) ;
+
+	myFile = fopen(proxi_db_name.c_str(), "w+b");
+	if( myFile )
+	{
+		struct dblog_write_context ctx;
+		ctx.buf = buf;
+		ctx.col_count = 4;
+		ctx.page_resv_bytes = 0;
+		ctx.page_size_exp = 12;
+		ctx.max_pages_exp = 0;
+		ctx.read_fn = read_fn_wctx;
+		ctx.flush_fn = flush_fn;
+		ctx.write_fn = write_fn;
+		int res = dblog_init_for_append(&ctx);
+		if( res == DBLOG_RES_NOT_FINALIZED)
+			dblog_finalize(&ctx);
+		if(!res)
+		{
+			res = dblog_set_col_val(&ctx, 0, DBLOG_TYPE_TEXT, date_time_string.c_str(), date_time_string.length());
+			if( res ){ print_error(res); fclose(myFile); return 0; }
+
+			res = dblog_set_col_val(&ctx, 1, DBLOG_TYPE_INT, &duration, sizeof(int));
+			if( res ){ print_error(res); fclose(myFile); return 0; }
+
+			res = dblog_append_empty_row(&ctx);
+			if( res ){ print_error(res); fclose(myFile); return 0; }
+
+			Serial.print(F("\nLogging completed. Finalizing...\n"));
+			if (!res)
+				res = dblog_finalize(&ctx);
+			fclose(myFile);
+			return 1;
+		}
+		else Serial.print(F("Open Error\n"));
+	}
 }
