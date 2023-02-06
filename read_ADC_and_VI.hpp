@@ -8,8 +8,8 @@
 
 ADS1115_lite adc(ADS1115_DEFAULT_ADDRESS); 
 
-double VCAL = 120;
-double ICAL = 0.5;
+double VCAL = 124;
+double ICAL = 0.55;
 double PHASECAL = 1.7;
 
 int startV;
@@ -22,12 +22,13 @@ double sqV,sumV,sqI,sumI,instP,sumP;
 double realPower, apparentPower, powerFactor, Vrms, Irms;
 bool lastVCross, checkVCross; 
 
-double I_RATIO = (long double)CT_TURNS / CT_BURDEN_RESISTOR * 4.096 / 32768 * ICAL;
-double V_RATIO = (long double)4.096 / 32768 * VCAL;
+// double I_RATIO = (long double)(CT_TURNS / CT_BURDEN_RESISTOR * 4.096 / 32768.0 * ICAL);
+double I_RATIO = 2.048 / 32768.0 * ICAL;
+double V_RATIO = (long double)(2.048 / 32768 * VCAL);
 
 void init_ADC()
 {
-    adc.setGain(ADS1115_REG_CONFIG_PGA_4_096V); //* I will have to multiply gotten raw values by (4.096/32767) ~ 0.0625mV to get the voltage equivalent
+    adc.setGain(ADS1115_REG_CONFIG_PGA_2_048V); //* I will have to multiply gotten raw values by (4.096/32767) ~ 0.0625mV to get the voltage equivalent
     adc.setSampleRate(ADS1115_REG_CONFIG_DR_128SPS);
 
     if (!adc.testConnection()) {
@@ -86,8 +87,9 @@ int calc_VI(unsigned int crossings, unsigned int timeout)		// typically use cros
 		// filteredV = sampleV - offsetV;
 		filteredV = sampleV;
 		// filteredV = 0.9989 * (lastFilteredV+sampleV-lastsampleV);
-		offsetI = offsetI + ((sampleI-offsetI)/32768);
-		filteredI = sampleI - offsetI;
+		// offsetI = offsetI + ((sampleI-offsetI)/32768);
+		// filteredI = sampleI - offsetI;
+		filteredI = sampleI;
 
 		// C) Root-mean-square method voltage
 		sqV= filteredV * filteredV;                 //1) square voltage values

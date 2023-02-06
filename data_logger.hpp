@@ -5,7 +5,11 @@
 #include <FS.h>
 #include <SD.h>
 #include "RTC_clock.hpp"
-#include <array>
+
+#define sd_miso 35
+#define sd_mosi 33
+#define sd_sclk 32
+#define sd_cs 25
 
 #define MAX_FILE_NAME_LEN 100
 #define MAX_STR_LEN 500
@@ -150,8 +154,6 @@ void check_for_month(fs::FS &fs, const char * path, std::string *read_month)
 	{
 		*read_month += file.read();
 	}
-	Serial.print("text from sd card: ");
-	Serial.println(read_month->c_str());
 	file.close();
 }
 
@@ -268,7 +270,7 @@ void recover_db()
 	fclose(myFile);
 }
 
-bool log_data(int16_t _sum, int16_t _peak, int16_t _least)
+bool log_data(int32_t _sum, int16_t _peak, int16_t _least)
 {
 	// data from the adc would be read every seconds and stored in an array
 	// every second. this data would be accumulated for 10 minutes and sent to the database
@@ -304,7 +306,7 @@ bool log_data(int16_t _sum, int16_t _peak, int16_t _least)
 			res = dblog_set_col_val(&ctx, 0, DBLOG_TYPE_TEXT, date_time_string.c_str(), date_time_string.length());
 			if( res ){ print_error(res); fclose(myFile); return 0; }
 			
-			res = dblog_set_col_val(&ctx, 1, DBLOG_TYPE_INT, &_sum, sizeof(int16_t));
+			res = dblog_set_col_val(&ctx, 1, DBLOG_TYPE_INT, &_sum, sizeof(int32_t));
 			if( res ){ print_error(res); fclose(myFile); return 0; }
 			
 			res = dblog_set_col_val(&ctx, 2, DBLOG_TYPE_INT, &_peak, sizeof(int16_t));
@@ -312,7 +314,6 @@ bool log_data(int16_t _sum, int16_t _peak, int16_t _least)
 			
 			res = dblog_set_col_val(&ctx, 3, DBLOG_TYPE_INT, &_least, sizeof(int16_t));
 			if( res ){ print_error(res); fclose(myFile); return 0; }
-			
 			
 			Serial.print(F("Logging completed. Finalizing...\n"));
 			if (!res)
@@ -339,7 +340,17 @@ int16_t get_int16(const byte *ptr)
 	return (*ptr << 8) | ptr[1];
 }
 
-void extract_row_values(struct dblog_read_context *ctx, char *first, int16_t *second, int16_t *third, int16_t *fouth)
+int32_t read_int32(const byte *ptr) 
+{
+  int32_t ret;
+  ret  = ((int32_t)*ptr++) << 24;
+  ret |= ((int32_t)*ptr++) << 16;
+  ret |= ((int32_t)*ptr++) << 8;
+  ret |= *ptr;
+  return ret;
+}
+
+void extract_row_values(struct dblog_read_context *ctx, char *first, int32_t *second, int16_t *third, int16_t *fouth)
 {
 	int16_t i = 0;
 	while(i < 4)
@@ -360,7 +371,7 @@ void extract_row_values(struct dblog_read_context *ctx, char *first, int16_t *se
 				}
 			}break;
 			case 1:
-				*second = get_int16(col_val);
+				*second = read_int32(col_val);
 				break;
 			case 2:
 				*third = get_int16(col_val);
@@ -373,20 +384,50 @@ void extract_row_values(struct dblog_read_context *ctx, char *first, int16_t *se
 	}
 }
 
+void extract_proxi_row_values(struct dblog_read_context *ctx, char *first, int16_t *second)
+{
+	int16_t i = 0;
+	while(i < 2)
+	{
+		uint32_t col_type;
+		const byte *col_val = (const byte *) dblog_read_col_val(ctx, i, &col_type);
+		if(!col_val) {
+			if(i == 0){ Serial.printf("Error reading value\n"); }
+			return;
+		}
+		switch (i)
+		{
+			case 0: {
+				uint32_t col_len = dblog_derive_data_len(col_type);
+				for(int j = 0; j < col_len; j++){
+					*first = (char)col_val[j];
+					first++;
+				}
+			}break;
+			case 1:
+				*second = read_int32(col_val);
+				break;
+		}
+		i++;
+	}
+}
+
 void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 {
 	int daily_summary [31][4];
-	int daily_energy_sum, daily_peak, daily_least;
+	int daily_power_sum;
+	int daily_peak, daily_least;
+	int16_t max_duration;
 	uint8_t current_month;
 	uint16_t current_year;
-	get_current_month_year(&current_month, &current_year);  //? what am I to do with this again?
-	*message += "Energy Usage summary per month.\nTotal Energy used(kWh): "; //todo change this while testing to reduce cost
+	get_current_month_year(&current_month, &current_year);
 
 	struct dblog_read_context rctx;
 	rctx.page_size_exp = 12;
 	rctx.read_fn = read_fn_rctx;
 
 	std::string temp_filename = filename;
+	std::string proxi_temp_filename = proxi_db_name;
 	if(month_difference)
 	{
 		if(month_difference >= current_month)
@@ -395,17 +436,22 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 			current_month = 12 - month_difference + current_month;
 			temp_filename.replace(4, 2, current_month < 10 ? ("0" + std::to_string(current_month)) : std::to_string(current_month));
 			temp_filename.replace(7, 4, std::to_string(current_year + 1900));
+
+			proxi_temp_filename.replace(4, 2, current_month < 10 ? ("0" + std::to_string(current_month)) : std::to_string(current_month));
+			proxi_temp_filename.replace(7, 4, std::to_string(current_year + 1900));
 		}
 		else
 		{
 			current_month -= month_difference;
 			temp_filename.replace(4, 2, current_month < 10 ? ("0" + std::to_string(current_month)) : std::to_string(current_month));
+
+			proxi_temp_filename.replace(4, 2, current_month < 10 ? ("0" + std::to_string(current_month)) : std::to_string(current_month));
 		}
 		if(SD.exists(temp_filename.c_str()))
 			myFile = fopen(temp_filename.c_str(), "r+b");
-		else 
+		else
 		{
-			Serial.println("File doesn't exist");
+			Serial.printf("File doesn't exist: %s\n", temp_filename.c_str());
 			return;
 		}
 	}
@@ -429,11 +475,15 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 			return;
 		}
 		char row_ts [17];
-		int16_t row_kWh, row_peak_W, row_least_W;
-		dblog_read_first_row(&rctx);
-		extract_row_values(&rctx, row_ts, &row_kWh, &row_peak_W, &row_least_W);
+		int32_t row_power;
+		int16_t row_peak_W, row_least_W;
+		dblog_read_first_row(&rctx);	//this is the first row that was used to init the db
+		res = dblog_read_next_row(&rctx);	//goes to the second row of null values
+		res = dblog_read_next_row(&rctx);	//where the logs actually start
+
+		extract_row_values(&rctx, row_ts, &row_power, &row_peak_W, &row_least_W);
 		uint16_t row_day = get_ts_part(row_ts + 8, 2);
-		daily_energy_sum = row_kWh;
+		daily_power_sum = row_power;
 		daily_peak = row_peak_W;
 		daily_least = row_least_W;
 
@@ -442,21 +492,21 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 		res = dblog_read_next_row(&rctx);
 		while(!res)
 		{
-			extract_row_values(&rctx, row_ts, &row_kWh, &row_peak_W, &row_least_W);
+			extract_row_values(&rctx, row_ts, &row_power, &row_peak_W, &row_least_W);
 			if( get_ts_part(row_ts + 8, 2) != row_day) // it's a new day, dump that of the previous day
 			{
 				daily_summary[j][0] = row_day;
-				daily_summary[j][1] = daily_energy_sum;
+				daily_summary[j][1] = daily_power_sum;
 				daily_summary[j][2] = daily_peak;
 				daily_summary[j][3] = daily_least;
 				
 				row_day = get_ts_part(row_ts + 8, 2);
-				daily_energy_sum = 0;	//reset the parameters after dumping
+				daily_power_sum = 0;	//reset the parameters after dumping
 				daily_peak = row_peak_W;
 				daily_least = row_least_W;
 				j++;
 			}
-			daily_energy_sum += row_kWh;
+			daily_power_sum += row_power;
 			if(row_peak_W > daily_peak)
 				daily_peak = row_peak_W;
 			if(row_least_W < daily_least)
@@ -466,11 +516,13 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 			if(res) //it's the end of the db
 			{
 				daily_summary[j][0] = row_day;
-				daily_summary[j][1] = daily_energy_sum;
+				daily_summary[j][1] = daily_power_sum;
 				daily_summary[j][2] = daily_peak;
 				daily_summary[j][3] = daily_least;
 			}
 		}
+		fclose(myFile);
+
 		//at this point all data would have been extracted into the array: let's roll
 		//to get the total energy used sum up all the index 1 column of all rows
 		//to get the peak power consumed iterate through the index 2 column to check the max value
@@ -478,11 +530,112 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 		//to get the average power consumed divide the sum energy by (i * 10)/60
 		//to get the average energy used per day divide the sum energy used by j
 		//
+		for(int x=0; x<=j; x++)
+		{
+			for(int y=0; y<4; y++)
+			{
+				Serial.print(daily_summary[x][y]);
+			 	Serial.print("|");
+			}
+			Serial.printf("\n");
+		}
+		int total_energy = 0;
+		int peak_power = daily_summary[0][2];
+		int least_power = daily_summary[0][2];
+		float total_energy_kwh;
+		float peak_power_kw, least_power_kw;
+		for(int x=0; x<=j; x++)
+		{
+			total_energy = total_energy + daily_summary[x][1];
+			if(daily_summary[x][2] > peak_power)
+				peak_power = daily_summary[x][2];
+			if(daily_summary[x][3] < least_power)
+				least_power = daily_summary[x][3];
+		}
+		total_energy_kwh = (total_energy / 3600.00) * (1 / 1000.00);
+		peak_power_kw = peak_power / 1000.0;
+		least_power_kw = least_power / 1000.0;
 
-		fclose(myFile);
+		float average_power_kw;		//todo:
+		float average_energy_used_daily;
+
+		*message += "Energy Usage summary for (" + std::to_string(current_month); 
+		*message += "/" + std::to_string(current_year + 1900);
+		*message += "):\nTotal Energy used(kWh): ";
+		*message += std::to_string(total_energy_kwh);
+		*message += "|Peak power used(kW): ";
+		*message += std::to_string(peak_power_kw) + "|";
+		*message += "Least power used(kW): " + std::to_string(least_power_kw);
 	}
-	else 
+	else{
 		Serial.print(F("Open Error\n"));
+		return;
+	}
+
+	// extract the maximum duration of object detected
+	if(month_difference)
+	{
+		if(SD.exists(proxi_temp_filename.c_str()))
+			myFile = fopen(proxi_temp_filename.c_str(), "r+b");
+		else
+		{
+			Serial.printf("File doesn't exist: %s\n", proxi_temp_filename.c_str());
+			return;
+		}
+	}
+	else
+		myFile = fopen(proxi_db_name.c_str(), "r+b");
+	if(myFile)
+	{
+		rctx.buf = buf;
+		int res = dblog_read_init(&rctx);
+		if ( res ){ print_error(res); fclose(myFile); return; }
+		if (memcmp(buf, sqlite_sig, 16) || buf[68] != 0xA5) 
+		{
+			Serial.print(F("Invalid DB. Try recovery.\n")); //todo: try adding a recovery code here
+			fclose(myFile);
+			return;
+		}
+		if (BUF_SIZE < (int32_t) 1 << rctx.page_size_exp)
+		{
+			Serial.print(F("Buffer size less than Page size. Try increasing if enough SRAM\n"));
+			fclose(myFile);
+			return;
+		}
+		char row_ts [17];
+		char max_duration_ts[17];
+		int16_t _duration;
+		dblog_read_first_row(&rctx);	//this is the first row that was used to init the db
+		res = dblog_read_next_row(&rctx);	//goes to the second row of null values
+		res = dblog_read_next_row(&rctx);	//where the logs actually start
+
+		extract_proxi_row_values(&rctx, row_ts, &_duration);
+		max_duration = _duration;
+		memcpy(max_duration_ts, row_ts, sizeof(row_ts));
+
+		res = dblog_read_next_row(&rctx);
+		while(!res)
+		{
+			extract_proxi_row_values(&rctx, row_ts, &_duration);
+			Serial.printf("duration gotten: %i", _duration);
+			if ( _duration > max_duration){
+				max_duration = _duration;
+				memcpy(max_duration_ts, row_ts, sizeof(row_ts));
+			}
+			res = dblog_read_next_row(&rctx);
+		}
+		fclose(myFile);
+		std::string time_stamp(max_duration_ts);
+		*message += "|Maximum duration of motion captured: ";
+		*message += std::to_string(max_duration) + "s|time of capture: ";
+		*message += std::string(max_duration_ts);
+		return;
+	}
+	else{
+		Serial.print(F("Proxi_db file open Error\n"));
+		*message += "|No motion captured";
+		return;
+	}
 }
 
 bool log_proximity_data(int duration)
@@ -490,7 +643,8 @@ bool log_proximity_data(int duration)
 	std::string date_time_string;
 	date_time_to_string( &date_time_string ) ;
 
-	myFile = fopen(proxi_db_name.c_str(), "w+b");
+	Serial.println(proxi_db_name.c_str());
+	myFile = fopen(proxi_db_name.c_str(), "r+b");
 	if( myFile )
 	{
 		struct dblog_write_context ctx;
@@ -507,13 +661,13 @@ bool log_proximity_data(int duration)
 			dblog_finalize(&ctx);
 		if(!res)
 		{
+			res = dblog_append_empty_row(&ctx);
+			if( res ){ print_error(res); fclose(myFile); return 0; }
+
 			res = dblog_set_col_val(&ctx, 0, DBLOG_TYPE_TEXT, date_time_string.c_str(), date_time_string.length());
 			if( res ){ print_error(res); fclose(myFile); return 0; }
 
 			res = dblog_set_col_val(&ctx, 1, DBLOG_TYPE_INT, &duration, sizeof(int));
-			if( res ){ print_error(res); fclose(myFile); return 0; }
-
-			res = dblog_append_empty_row(&ctx);
 			if( res ){ print_error(res); fclose(myFile); return 0; }
 
 			Serial.print(F("\nLogging completed. Finalizing...\n"));
@@ -522,6 +676,17 @@ bool log_proximity_data(int duration)
 			fclose(myFile);
 			return 1;
 		}
-		else Serial.print(F("Open Error\n"));
+		else
+		{
+			fclose(myFile);
+			print_error(res);
+			return 0;
+		}
 	}
+	else
+	{
+		Serial.print(F("Open Error\n"));
+		return 0;
+	} 
+	
 }

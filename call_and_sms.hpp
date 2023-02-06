@@ -74,8 +74,8 @@ void setup_SIM800()
     digitalWrite(MODEM_PWRKEY, HIGH);
 
     // Initialize the indicator as an output
-    pinMode(LED_GPIO, OUTPUT);
-    digitalWrite(LED_GPIO, LED_OFF);
+    // pinMode(LED_GPIO, OUTPUT);
+    // digitalWrite(LED_GPIO, LED_OFF);
 }
 
 void init_SIM800_serial()
@@ -102,33 +102,33 @@ void send_SMS( std::string SMS_target, std::string message )
 
 bool recieved_call( std::string *tel_no )
 {
+    delay(2500);
     char buffer[100];
-    if( SerialAT.available() > 0 )
+    while(SerialAT.available())
     {
-        // Serial.println("I got here 1");
-        // if(SerialAT.find("RING")){
-        //     Serial.println("I got here 2.1");
-        //     SerialAT.readBytes(buffer, sizeof(buffer));
-        //     Serial.println("I'm here");
-        // }
-        // else return 0;
-    // }
-        SerialAT.readBytes(buffer, sizeof(buffer));
+        SerialAT.readBytes(buffer, 50);
+        Serial.println(buffer);
         std::string buff(buffer);
-        if(buff.find("RING") != std::string::npos){
+        if(buff.find("RING") != std::string::npos)
+        {
+            Serial.println("got a call");
             size_t pos;
-            Serial.println("I'm here");
-            if(buff.find("\"+") != std::string::npos)
+            if(buff.find(": \"") != std::string::npos)
             {
-                pos = buff.find("\"+");
-                *tel_no = buff.substr(pos + 1, 14);
-                return 1;
+                pos = buff.find(": \"");
+                *tel_no = buff.substr(pos + 3, 11); //I should use a delimeter I think not all numbers would be the same length.
+                Serial.printf("tel no: %s\n", tel_no->c_str());
+                SerialAT.write("ATH\r\n");
+                Serial.println("hanging up");
+                return true;
             }
+            else return false;
         }
-        else return 0;
+        else return false;
     }
-    else {
-        Serial.println("noting in serial");
-        return 0;
+    while(Serial.available())
+    {
+        SerialAT.write(Serial.read());
     }
+    return false;
 }
