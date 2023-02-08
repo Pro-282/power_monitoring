@@ -5,7 +5,7 @@
 
 #define proximity_pin 14
 
-int16_t read_watts[1800];
+int16_t read_watts[60];
 int counter_array[10];
 
 TaskHandle_t read_vi;
