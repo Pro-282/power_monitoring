@@ -369,6 +369,7 @@ void extract_row_values(struct dblog_read_context *ctx, char *first, int32_t *se
 					*first = (char)col_val[j];
 					first++;
 				}
+				*first = '\0';
 			}break;
 			case 1:
 				*second = read_int32(col_val);
@@ -403,6 +404,7 @@ void extract_proxi_row_values(struct dblog_read_context *ctx, char *first, int16
 					*first = (char)col_val[j];
 					first++;
 				}
+				*first = '\0';
 			}break;
 			case 1:
 				*second = read_int32(col_val);
@@ -447,13 +449,7 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 
 			proxi_temp_filename.replace(4, 2, current_month < 10 ? ("0" + std::to_string(current_month)) : std::to_string(current_month));
 		}
-		if(SD.exists(temp_filename.c_str()))
-			myFile = fopen(temp_filename.c_str(), "r+b");
-		else
-		{
-			Serial.printf("File doesn't exist: %s\n", temp_filename.c_str());
-			return;
-		}
+		myFile = fopen(temp_filename.c_str(), "r+b");
 	}
 	else
 		myFile = fopen(filename.c_str(), "r+b"); //I will have to change the filename to that of a previous month and check if the file exists for the next stint
@@ -568,21 +564,13 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 		*message += "Least power used(kW): " + std::to_string(least_power_kw);
 	}
 	else{
-		Serial.print(F("Open Error\n"));
+		Serial.print("Error opening file for reading\n");
 		return;
 	}
 
 	// extract the maximum duration of object detected
 	if(month_difference)
-	{
-		if(SD.exists(proxi_temp_filename.c_str()))
-			myFile = fopen(proxi_temp_filename.c_str(), "r+b");
-		else
-		{
-			Serial.printf("File doesn't exist: %s\n", proxi_temp_filename.c_str());
-			return;
-		}
-	}
+		myFile = fopen(proxi_temp_filename.c_str(), "r+b");
 	else
 		myFile = fopen(proxi_db_name.c_str(), "r+b");
 	if(myFile)
@@ -607,7 +595,7 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 		int16_t _duration;
 		dblog_read_first_row(&rctx);	//this is the first row that was used to init the db
 		res = dblog_read_next_row(&rctx);	//goes to the second row of null values
-		res = dblog_read_next_row(&rctx);	//where the logs actually start
+		res = dblog_read_next_row(&rctx);	//where the logs actually start(a bug-I don't know the source)
 
 		extract_proxi_row_values(&rctx, row_ts, &_duration);
 		max_duration = _duration;
@@ -628,7 +616,7 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 		std::string time_stamp(max_duration_ts);
 		*message += "|Maximum duration of motion captured: ";
 		*message += std::to_string(max_duration) + "s|time of capture: ";
-		*message += std::string(max_duration_ts);
+		*message += std::string(max_duration_ts) + "\n";
 		return;
 	}
 	else{

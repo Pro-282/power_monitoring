@@ -5,7 +5,7 @@
 
 #define proximity_pin 14
 
-int16_t read_watts[60];
+int16_t read_watts[1800];
 int counter_array[10];
 
 TaskHandle_t read_vi;
@@ -33,7 +33,7 @@ void read_vi_task(void *pvParameters)
     vSemaphoreCreateBinary( batton );
     for(;;)
     {
-        if(counter >= 60)
+        if(counter >= 1800)
         {
             xSemaphoreTake( batton, portMAX_DELAY);
             xTaskCreatePinnedToCore(flush_to_db_task,
@@ -55,9 +55,9 @@ void read_vi_task(void *pvParameters)
 
 void flush_to_db_task(void *pvParameters)
 {
-    int16_t copied_read_watts[60];
+    int16_t copied_read_watts[1800];
     xSemaphoreTake( batton, portMAX_DELAY);
-    memcpy(copied_read_watts, read_watts, (60*sizeof(int16_t)));
+    memcpy(copied_read_watts, read_watts, (sizeof(copied_read_watts)));
     xSemaphoreGive(batton);
     // wait for 8 minutes if the sms_task is running, for the sms to be sent, this is because only one file can be opened at a time for operation.
     // xSemaphoreTake( sms_wait, pdMS_TO_TICKS(480000));
