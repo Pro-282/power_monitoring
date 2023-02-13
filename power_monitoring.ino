@@ -42,9 +42,14 @@ void read_vi_task(void *pvParameters)
             xSemaphoreGive(batton);
             counter = 0;
         }
-            read_watts[counter]= calc_VI(10, 200);
-            Serial.printf("%i\n", read_watts[counter]);
-            ++counter;
+        int read_VI = calc_VI(10, 200);
+        serialprint();
+        if (powerFactor >= 1.00)
+            read_watts[counter] = 0;
+        else read_watts[counter]= calc_VI(10, 200);
+        Serial.printf("%i\n", read_watts[counter]);
+        ++counter;
+        // }
         xTaskDelayUntil(&xLastWakeTime, read_frequency);
     }
 }
@@ -82,22 +87,52 @@ void flush_to_db_task(void *pvParameters)
     }
 }
 
+// this sends the string of message to be sent by sms by packets, since 
+// sending all string at once didn't work
+void send_packet(std::string _message){
+    int16_t packets = (_message.length() / 1000) + 1;
+    Serial.printf("No. of Packets in string: %i\n", packets);
+    int32_t pos = 0;
+    std::string packet_message;
+    for(int16_t i=0; i<packets; i++){
+        packet_message = _message.substr(pos, 1000);
+        packet_message += " (Page: " + std::to_string(i+1) + ") ";
+        send_SMS(recipient_no, packet_message);
+        pos += 1000;
+        delay(100);
+    }
+    _message.clear();
+}
+
 void send_data_task( void *pvParameters )
 {
     xSemaphoreTake( sms_wait, portMAX_DELAY);
     std::string message;
-    message.clear();
     for(;;)
     {
         retrieve_monthly_data(&message);
-        retrieve_monthly_data(&message, 1);
-        retrieve_monthly_data(&message, 2);
-        delay(500);
         Serial.println("about to send sms");
         Serial.println(message.c_str());
-        send_SMS(recipient_no, message);
+        send_packet(message);
+
+        message.clear();
+        retrieve_monthly_data(&message, 1);
+        if(!message.empty()){
+            Serial.println("about to send sms");
+            Serial.println(message.c_str());
+            send_packet(message);
+        }
+        
+        // message.clear();
+        // retrieve_monthly_data(&message, 2);
+        // if(!message.empty()){
+        //     Serial.println("about to send sms");
+        //     Serial.println(message.c_str());
+        //     send_packet(message);
+        // }
 
         xSemaphoreGive(sms_wait);
+        message.clear();
         vTaskDelete(NULL);
     }
 }
