@@ -26,9 +26,6 @@
 #define IP5306_ADDR          0x75
 #define IP5306_REG_SYS_CTL0  0x00
 
-// Set phone numbers, if you want to test SMS and Calls
-// #define SMS_TARGET  "+380xxxxxxxxx" //todo: I'm to change this later
-// #define CALL_TARGET "+380xxxxxxxxx"
 std::string recipient_no;
 
 TinyGsm modem(SerialAT);		//TinyGSM object instance
@@ -72,16 +69,11 @@ void setup_SIM800()
     digitalWrite(MODEM_PWRKEY, LOW);
     delay(1000);
     digitalWrite(MODEM_PWRKEY, HIGH);
-
-    // Initialize the indicator as an output
-    // pinMode(LED_GPIO, OUTPUT);
-    // digitalWrite(LED_GPIO, LED_OFF);
 }
 
 void init_SIM800_serial()
 {
     SerialAT.begin(115200, SERIAL_8N1, MODEM_RX, MODEM_TX);
-    // delay(3000);
 }
 
 void init_SIM800()
@@ -116,7 +108,7 @@ bool recieved_call( std::string *tel_no )
             if(buff.find(": \"") != std::string::npos)
             {
                 pos = buff.find(": \"");
-                *tel_no = buff.substr(pos + 3, 11); //I should use a delimeter I think not all numbers would be the same length.
+                *tel_no = buff.substr(pos + 3, 11);
                 Serial.printf("tel no: %s\n", tel_no->c_str());
                 SerialAT.write("ATH\r\n");
                 Serial.println("hanging up");

@@ -2,7 +2,6 @@
 
 #include <Wire.h>
 
-// DS1307 RTC I2C address
 #define DS1307_I2C_ADDRESS    (0xD0 >> 1)
 
 bool readBuffer(uint8_t reg, void *bufferRead, uint8_t readLen)

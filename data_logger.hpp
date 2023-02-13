@@ -16,7 +16,6 @@
 
 #define BUF_SIZE 4096
 byte buf[BUF_SIZE];
-//todo: I'm to constantly update this based on the current month
 std::string filename;
 std::string proxi_db_name = "not_set_yet.DB";
 extern const char sqlite_sig[];
@@ -247,7 +246,6 @@ void recover_db()
 	ctx.read_fn = read_fn_wctx;
 	ctx.write_fn = write_fn;
 	ctx.flush_fn = flush_fn;
-	// input_db_name();
 	myFile = fopen(filename.c_str(), "r+b");
 	if (!myFile)
 	{
@@ -460,7 +458,7 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 		if ( res ){ print_error(res); fclose(myFile); return; }
 		if (memcmp(buf, sqlite_sig, 16) || buf[68] != 0xA5) 
 		{
-			Serial.print(F("Invalid DB. Try recovery.\n")); //todo: try adding a recovery code here
+			Serial.print(F("Invalid DB. Try recovery.\n"));
 			fclose(myFile);
 			return;
 		}

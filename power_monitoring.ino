@@ -42,13 +42,9 @@ void read_vi_task(void *pvParameters)
             xSemaphoreGive(batton);
             counter = 0;
         }
-        // int sampleV = read_voltage_raw();
-        // Serial.println("got here but no power");
-        // if ((sampleV < (ADC_COUNTS*0.55)) && (sampleV > (ADC_COUNTS*0.45))) {
             read_watts[counter]= calc_VI(10, 200);
             Serial.printf("%i\n", read_watts[counter]);
             ++counter;
-        // }
         xTaskDelayUntil(&xLastWakeTime, read_frequency);
     }
 }
@@ -59,9 +55,8 @@ void flush_to_db_task(void *pvParameters)
     xSemaphoreTake( batton, portMAX_DELAY);
     memcpy(copied_read_watts, read_watts, (sizeof(copied_read_watts)));
     xSemaphoreGive(batton);
-    // wait for 8 minutes if the sms_task is running, for the sms to be sent, this is because only one file can be opened at a time for operation.
-    // xSemaphoreTake( sms_wait, pdMS_TO_TICKS(480000));
-    xSemaphoreTake( sms_wait, pdMS_TO_TICKS(55000));    //todo: remove this line
+    // wait for some time if the sms_task is running, for the sms to be sent, this is because only one file can be opened at a time for operation.
+    xSemaphoreTake( sms_wait, pdMS_TO_TICKS(55000));
     
     check_and_update_month_file();
 
@@ -107,7 +102,7 @@ void send_data_task( void *pvParameters )
     }
 }
 
-void check_for_calls_task( void *pvParameters )//this will always be running to listen, I don't know if interrupts can work though, I don't even know how it works.
+void check_for_calls_task( void *pvParameters )
 {
     SerialAT.write("AT\r\n");
     for(;;)
