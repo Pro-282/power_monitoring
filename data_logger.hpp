@@ -468,6 +468,16 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 			fclose(myFile);
 			return;
 		}
+		std::string date_time_string;
+		date_time_to_string( &date_time_string ) ;
+		*message += "Energy Usage data for (" + std::to_string(current_month); 
+		*message += "-" + std::to_string(current_year + 1900) + ") . Retrieved on ";
+		*message += date_time_string + " \n";
+		*message += "Date, (Time) Int_1, (Time) Int_2, (Time) Int_3, (Time) Int_4, (Time) Int_5,";
+		*message += "(Time) Int_6, (Time) Int_7, (Time) Int_8, (Time) Int_9, (Time) Int_10,";
+		*message += "(Time) Int_11, (Time) Int_12, (Time) Int_13, (Time) Int_14, (Time) Int_15,";
+		*message += "(Time) Int_16, (Time) Int_17, (Time) Int_18\n";
+
 		char row_ts [17];
 		int32_t row_power;
 		int16_t row_peak_W, row_least_W;
@@ -480,6 +490,11 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 		daily_power_sum = row_power;
 		daily_peak = row_peak_W;
 		daily_least = row_least_W;
+		int16_t count = 0;
+		*message += std::string(row_ts).substr(0, 10) + ", (";	//Date of the row data
+		*message += std::string(row_ts).substr(11, 5) + ") ";	//time of the cell data
+		*message += std::to_string((row_power / 3600.00) * (1 / 1000.00)) + ", ";
+		count++;
 
 		int i = 1; //i is for db row counting, multiply by 10 minutes to get total approximate minutes of power usage
 		int j = 0; //iterate through the rows of the 2d array (it shows how many days power was used)
@@ -487,8 +502,20 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 		while(!res)
 		{
 			extract_row_values(&rctx, row_ts, &row_power, &row_peak_W, &row_least_W);
+			if(count == 18)
+			{
+				while(get_ts_part(row_ts + 8, 2) == row_day)
+				{
+					res = dblog_read_next_row(&rctx);
+					extract_row_values(&rctx, row_ts, &row_power, &row_peak_W, &row_least_W);
+					// delay(5);
+				}
+				count = 0;
+			}
 			if( get_ts_part(row_ts + 8, 2) != row_day) // it's a new day, dump that of the previous day
 			{
+				*message += "\n" + std::string(row_ts).substr(0, 10) + ", ";
+				count = 0;
 				daily_summary[j][0] = row_day;
 				daily_summary[j][1] = daily_power_sum;
 				daily_summary[j][2] = daily_peak;
@@ -500,6 +527,9 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 				daily_least = row_least_W;
 				j++;
 			}
+			*message += "(" + std::string(row_ts).substr(11, 5) + ") ";
+			*message += std::to_string((row_power / 3600.0) * (1 / 1000.0)) + ", ";
+			count++;
 			daily_power_sum += row_power;
 			if(row_peak_W > daily_peak)
 				daily_peak = row_peak_W;
@@ -553,9 +583,7 @@ void retrieve_monthly_data(std::string *message, int8_t month_difference = 0)
 		float average_power_kw;		//todo:
 		float average_energy_used_daily;
 
-		*message += "Energy Usage summary for (" + std::to_string(current_month); 
-		*message += "/" + std::to_string(current_year + 1900);
-		*message += "):\nTotal Energy used(kWh): ";
+		*message += "\nTotal Energy used(kWh): ";
 		*message += std::to_string(total_energy_kwh);
 		*message += "|Peak power used(kW): ";
 		*message += std::to_string(peak_power_kw) + "|";
